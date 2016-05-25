@@ -11,30 +11,64 @@
 #3) Intersect with LDAS 1/8° grid
 #4) Identify pixels with the majority of each fire (note: most fires will not cover more than one pixel.  If they do, 
 
+#-----------load packages------------------------------------
+sapply(c("ggplot2", "raster", "sp","rgdal","reshape2"), ndpkg)
 
+
+#-----------extract tifs from folders------------------------
 
 setwd("~/Desktop/MTBS_fires/Fires/Data/fires_2008_2014")
 dlist <- list.dirs(getwd(), full.names = FALSE)
 for (i in dlist){
   rlist <- list.files(i, pattern = "nbr6.tif$", full.names = TRUE)
-  for (j in rlist){
-    plot(assign(unlist(strsplit(j, "[.]"))[1], raster(j)))
-    
+}
+
+#-----------Change projection to Geographic-----------------
+for (j in rlist){
+  
+  r <- assign(unlist(strsplit(j, "[.]"))[1], raster(j))
+  sr <- "+proj=longlat +ellps=WGS84 +no_defs"
+  pr <-projectRaster(r, crs = sr, method = "ngb")
+  z <- projectRaster(from = pr, to = grdr, method = "ngb")
     
 }
 
-}
 
-tlist <- list(ls())
+#----Making long/lat grid------------------------------------------------------------------
+save(grd, file = "~/Desktop/MTBS_fires/Fires/Data/grid.rda")
+load("~/Desktop/MTBS_fires/Fires/Data/grid.rda")
 
-r <- raster("/Users/joe/Desktop/MTBS_fires/Fires/Data/fires_2008_2014/OR4474212096020110801/or4474212096020110801_20110723_20110808_dnbr6.tif")
-sr <- "+proj=aea +lat_1=24 +lat_2=31.5 +lat_0=24 +lon_0=-84 +x_0=400000 +y_0=0 +ellps=GRS80 +units=m +no_defs" 
+coordinates(grd) <-  ~lon+lat                            #set the x/y coordinates to create spatial object
+proj4string(grd) <-  CRS("+init=epsg:4326")              #set coordinate reference system
+grd <- spTransform(grd, CRS(sr2))                        #convert to geographic projection
+gridded(grd) <- TRUE                                     #specify spatial data as gridded
 
+grdr <- raster(grd)                                      #convert to raster
+projection(grdr) <- CRS(sr2)                             #set the CRS
+plot(grdr)                                               #check it out
+                                                         # V save as geoTIFF
+writeRaster(grdr,"~/Desktop/MTBS_fires/Fires/Data/grid.tif", overwrite = TRUE)
+
+#------Test stuff------------------------------------------
+r<- raster(j)
+sr2 <- "+proj=longlat +ellps=WGS84 +no_defs"
 # Project Raster, using nearest neighbor
-projected_raster <- projectRaster(r, crs = sr, method = "ngb")
+projected_raster <- projectRaster(r, crs = sr2, method = "ngb")
 plot(projected_raster)
 ras_pr <- rasterToPoints(projected_raster, Spatial = T)
-proj4string(ras_pr)
 
-ras_pr@data <- data.frame(ras_pr@data, long=coordinates(ras_pr)[,1],lat=coordinates(ras_pr)[,2])
+z <- overlay(projected_raster, grdr, fun=function(x,y){return(x+y)})
 
+ras_pr <- data.frame(rasterToPoints(projected_raster))
+colnames(ras_pr) <- c("x", "y", "value")
+grdr_pr <- data.frame(rasterToPoints(grdr))
+
+head(grdr_pr)
+head(ras_pr)
+
+ggplot(ras_pr, aes(x = x, y = y, fill = value)) +geom_raster() 
+z <- projectRaster(from = projected_raster, to = grdr, method = "ngb")
+z_pr <- data.frame(rasterToPoints(z))
+colnames(z_pr) <- c("lon", "lat", "value")
+
+ggplot(z_pr, aes(x = lon, y = lat, fill = value)) +geom_raster() 
