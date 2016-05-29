@@ -20,7 +20,8 @@ sapply(
 
 load("~/Desktop/MTBS_fires/Fires/Data/yr_grid.rda")
 grdr <- raster("~/Desktop/MTBS_fires/Fires/Data/grid.tif")
-
+yr_grd_org <- yr_grd
+yr_grd <- subset(yr_grd, year >= 2007)
 #-----------extract tifs from folders------------------------
 
 setwd("~/Desktop/MTBS_fires/Fires/Data/fires_2008_2014")
@@ -40,35 +41,59 @@ for (j in rlist){
   r <- assign(unlist(strsplit(j, "[.]"))[1], raster(j))
   sr <- "+proj=longlat +ellps=WGS84 +no_defs"
   pr <-projectRaster(r, crs = sr, method = "ngb")
-
-#----------Extract date and location------------------------ 
+  
+#----------Extract date------------------------------------
     pr_dt <-as.Date(
-    ifelse(strsplit(names(pr), "_")[[1]][3] == "nbr6",   #files are either dnbr6 or nbr6
-           strsplit(names(pr), "_")[[1]][2],             #nbr6 files have one date, dnbr6 have two
-           strsplit(names(pr), "_")[[1]][3]),            #getting the date from the file name. 
-     format = '%Y%m%d'
-  )
+      substring(                          #last 8 digits of first section of file name are data of fire
+        strsplit(
+          names(pr),"_")[[1]][1],
+        first = 14, last = 21),
+      format = '%Y%m%d'
+      )
   mr <- month(pr_dt)
   yr <- year(pr_dt)
+
+#---------Extracting pixel with greatest coverage---------  
   
   pr[pr == 0] <- NA                       #removing "black" area                                        
-  pr <- trim(pr)                          #and trimming NA values
-  
-  cr <- rasterToPoints(crop(grdr, pr))    #crop grdr to the firezone               
+  pr <- trim(pr)                          #and trimming NA values 
+  cr <- crop(                             #crop grdr to the firezone 
+          grdr,
+            extent(xmin(pr) -.125,
+                   xmax(pr) +.125,
+                    ymin(pr) -.125,
+                    ymax(pr) +.125
+                 ))
+  cr <- setValues(cr,                    #assign random value to each pixel in the area as marker
+                  rnorm(ncell(cr)
+                        )) 
+  tb <- as.data.frame(                   #get total of fire points in each box
+    table(
+      extract(cr,
+              rasterToPoints(pr)
+              [,c(1,2)]
+              ))) 
+  mtb <- as.character(                   #grid cell with maximum points
+    tb[which.max(tb$Freq),
+       1]
+    )
+  rstrr <- as.data.frame(rasterToPoints(cr))          #long-form matrix
+  lt <- rstrr[rstrr$grid == mtb,"y"]
+  ln <- rstrr[rstrr$grid == mtb,"x"]
 
 #---------Add severity class pixels to date/location-------    
   yr_grd[yr_grd$month %in% mr &
            yr_grd$year %in% yr &
-           yr_grd$lat %in% cr[,"y"] &
-           yr_grd$lon %in% cr[,"x"],"fire"] <-
-           cr[, 3]                               #match the location and date
+           yr_grd$lat %in% lt &
+           yr_grd$lon %in% ln,"fire"] <-
+           1                               #match the location and date
 
 tr <- as.data.frame(table(values(pr)))
   for (k in tr$Var1){
     yr_grd[yr_grd$month %in% mr &
              yr_grd$year %in% yr &
-             yr_grd$lat %in% cr[,"y"] &
-             yr_grd$lon %in% cr[,"x"] , paste0("sev",k)] <- table(values(pr))[[k]]
+             yr_grd$lat %in% lt &
+             yr_grd$lon %in% ln, paste0("sev",k)] <- table(values(pr))[[k]]
   }
 }
 
@@ -78,7 +103,7 @@ tr <- as.data.frame(table(values(pr)))
 
 #--------------FUNCTION END FUNCTION END-------------------------
 
-
+save(yr_grd, file = "~/Desktop/MTBS_fires/Fires/Data/fr_grd.rda")
 
 
 #----Making long/lat grid------------------------------------------------------------------
@@ -109,10 +134,10 @@ yr_grd$sev6 <- NA
 save(yr_grd, file = "~/Desktop/MTBS_fires/Fires/Data/yr_grid.rda")
 load("~/Desktop/MTBS_fires/Fires/Data/yr_grid.rda")
 #------Test stuff------------------------------------------
-r<- raster(j)
+r<- raster("WY4495310930920110821/wy4495310930920110821_20120623_nbr6.tif")
 
 # Project Raster, using nearest neighbor
-projected_raster <- projectRaster(r, crs = sr2, method = "ngb")
+projected_raster <- projectRaster(r, crs = sr, method = "ngb")
 plot(projected_raster)
 
 
@@ -150,21 +175,19 @@ ifelse(strsplit(names(projected_raster), "_")[[1]][3] == "nbr6",
        strsplit(names(projected_raster), "_")[[1]][2],
        strsplit(names(projected_raster),"_")[[1]][3])
 
-#get lat lon to subset raster
-latlon <-subset(grdr_pr,
-                x >= xmin(projected_raster) - .125 &
-                  x <= xmax(projected_raster) + .125 &
-                  y >= ymin(projected_raster) - .125 &
-                  y <= ymax(projected_raster) + .125)[,c(1:2)]
+##getting outline of raster as polygon to use with extract
 
-test <- subset(grdr,
-               xmin == min(latlon$x) &
-                 xmax == max(latlon$x) &
-                 ymin == min(latlon$y) &
-                 ymax == max(latlon$y))
+ee <- extent(xmin(projected_raster) -.125, xmax(projected_raster) +.125, ymin(projected_raster) -.125, ymax(projected_raster) +.125) # works
+rst <- crop(grdr, ee)  #works
+rst <- setValues(rst, rnorm(ncell(rst))) #works
+tb <- as.data.frame(table(extract(rst, rasterToPoints(projected_raster)[,c(1,2)]))) #works
+mtb <- as.character(tb[1,which.max(tb$Freq)])
+rstrr <- rasterToPoints(rst)
+rstrr[rstrr[,3] == mtb,"x"]
+rstrr[rstrr[,3] == mtb,"y"]
 
-rasterToPoints(crop(grdr, projected_raster))
 
+#making the dataframe to be amended
 yr_grd <- data.frame(year = all_var$year, month = all_var$month, lat = all_var$lat, lon = all_var$lon)
 yr_grd$fire <- NA
 yr_grd$sev1 <- NA
@@ -177,4 +200,10 @@ yr_grd$sev6 <- NA
 
 table(values(projected_raster))[["6"]]
 yr_grd$date < NULL
+
+
+#figuring out date stuff
+substring(strsplit(names(projected_raster),"_")[[1]][1],first = 14, last = 21)
+
+
 
